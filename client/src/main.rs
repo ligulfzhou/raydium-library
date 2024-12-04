@@ -2,7 +2,7 @@
 
 use anyhow::{Ok, Result};
 use clap::Parser;
-use solana_client::rpc_client::RpcClient;
+use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, signer::Signer};
 use std::sync::Arc;
 
@@ -37,11 +37,11 @@ pub struct Opts {
     pub command: Command,
 }
 
-pub fn entry(opts: Opts) -> Result<()> {
+pub async fn entry(opts: Opts) -> Result<()> {
     // default config
     let mut config = common_types::CommonConfig::default();
     // config file override
-    config.file_override().unwrap();
+    config.file_override()?;
     // config command override
     let command_override = opts.command_override;
     config.command_override(command_override);
@@ -56,30 +56,31 @@ pub fn entry(opts: Opts) -> Result<()> {
 
     let instructions = match opts.command {
         Command::CPSWAP { subcmd } => {
-            cpswap_cli::process_cpswap_commands(subcmd, &config, &mut signing_keypairs).unwrap()
+            cpswap_cli::process_cpswap_commands(subcmd, &config, &mut signing_keypairs).await?
         }
-        Command::AMM { subcmd } => amm_cli::process_amm_commands(subcmd, &config).unwrap(),
+        Command::AMM { subcmd } => amm_cli::process_amm_commands(subcmd, &config).await?,
         Command::CLMM { subcmd } => {
-            clmm_cli::process_clmm_commands(subcmd, &config, &mut signing_keypairs).unwrap()
+            clmm_cli::process_clmm_commands(subcmd, &config, &mut signing_keypairs).await?
         }
     };
     match instructions {
         Some(instructions) => {
             // build txn
-            let rpc_client = RpcClient::new(config.cluster().url());
+            let rpc_client = RpcClient::new(config.cluster().url().to_string());
             let txn =
-                rpc::build_txn(&rpc_client, &instructions, &fee_payer, &signing_keypairs).unwrap();
+                rpc::build_txn(&rpc_client, &instructions, &fee_payer, &signing_keypairs).await?;
             if config.simulate() {
                 let sig = rpc::simulate_transaction(
                     &rpc_client,
                     &txn,
                     false,
                     CommitmentConfig::confirmed(),
-                );
+                )
+                .await?;
                 println!("{:#?}", sig);
             } else {
                 //  send txn
-                let sig = rpc::send_txn(&rpc_client, &txn, true);
+                let sig = rpc::send_txn(&rpc_client, &txn, true).await?;
                 println!("{:#?}", sig);
             }
         }
@@ -90,6 +91,7 @@ pub fn entry(opts: Opts) -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
-    entry(Opts::parse())
+#[tokio::main]
+async fn main() -> Result<()> {
+    entry(Opts::parse()).await
 }

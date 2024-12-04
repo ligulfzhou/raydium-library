@@ -2,7 +2,7 @@ use crate::cpswap_types::{CpSwapLiquidityChangeResult, CpSwapSwapChangeResult};
 use anyhow::Result;
 use arrayref::array_ref;
 use common::{common_utils, rpc};
-use solana_client::rpc_client::RpcClient;
+use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::convert::{TryFrom, TryInto};
 
@@ -43,7 +43,7 @@ pub fn specified_tokens_to_lp_tokens(
     liquidity
 }
 
-pub fn add_liquidity_calculate(
+pub async fn add_liquidity_calculate(
     rpc_client: &RpcClient,
     pool_id: Pubkey,
     amount_specified: u64,
@@ -52,7 +52,7 @@ pub fn add_liquidity_calculate(
 ) -> Result<CpSwapLiquidityChangeResult> {
     let pool_state =
         rpc::get_anchor_account::<raydium_cp_swap::states::PoolState>(rpc_client, &pool_id)
-            .unwrap()
+            .await?
             .unwrap();
     // load account
     let load_pubkeys = vec![
@@ -61,19 +61,19 @@ pub fn add_liquidity_calculate(
         pool_state.token_0_mint,
         pool_state.token_1_mint,
     ];
-    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).unwrap();
-    let [token_0_vault_account, token_1_vault_account, token_0_mint_account, token_1_mint_account] =
+    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).await?;
+    let [token_0_vault_account, token_1_vault_account, token_0_mint_account, token_1_mint_account]: &[_; 4] =
         array_ref![rsps, 0, 4];
     // docode account
     let token_0_vault_info =
-        common_utils::unpack_token(&token_0_vault_account.as_ref().unwrap().data).unwrap();
+        common_utils::unpack_token(&token_0_vault_account.as_ref().unwrap().data)?;
     let token_1_vault_info =
-        common_utils::unpack_token(&token_1_vault_account.as_ref().unwrap().data).unwrap();
+        common_utils::unpack_token(&token_1_vault_account.as_ref().unwrap().data)?;
     let token_0_mint_info =
-        common_utils::unpack_mint(&token_0_mint_account.as_ref().unwrap().data).unwrap();
+        common_utils::unpack_mint(&token_0_mint_account.as_ref().unwrap().data)?;
     let token_1_mint_info =
-        common_utils::unpack_mint(&token_1_mint_account.as_ref().unwrap().data).unwrap();
-    let epoch = rpc_client.get_epoch_info().unwrap().epoch;
+        common_utils::unpack_mint(&token_1_mint_account.as_ref().unwrap().data)?;
+    let epoch = rpc_client.get_epoch_info().await?.epoch;
 
     let (total_token_0_amount, total_token_1_amount) = pool_state.vault_amount_without_fee(
         token_0_vault_info.base.amount,
@@ -146,7 +146,7 @@ pub fn add_liquidity_calculate(
     })
 }
 
-pub fn remove_liquidity_calculate(
+pub async fn remove_liquidity_calculate(
     rpc_client: &RpcClient,
     pool_id: Pubkey,
     input_lp_amount: u64,
@@ -154,7 +154,7 @@ pub fn remove_liquidity_calculate(
 ) -> Result<CpSwapLiquidityChangeResult> {
     let pool_state =
         rpc::get_anchor_account::<raydium_cp_swap::states::PoolState>(rpc_client, &pool_id)
-            .unwrap()
+            .await?
             .unwrap();
     // load account
     let load_pubkeys = vec![
@@ -163,19 +163,19 @@ pub fn remove_liquidity_calculate(
         pool_state.token_0_mint,
         pool_state.token_1_mint,
     ];
-    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).unwrap();
+    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).await?;
     let [token_0_vault_account, token_1_vault_account, token_0_mint_account, token_1_mint_account] =
         array_ref![rsps, 0, 4];
     // docode account
     let token_0_vault_info =
-        common_utils::unpack_token(&token_0_vault_account.as_ref().unwrap().data).unwrap();
+        common_utils::unpack_token(&token_0_vault_account.as_ref().unwrap().data)?;
     let token_1_vault_info =
-        common_utils::unpack_token(&token_1_vault_account.as_ref().unwrap().data).unwrap();
+        common_utils::unpack_token(&token_1_vault_account.as_ref().unwrap().data)?;
     let token_0_mint_info =
-        common_utils::unpack_mint(&token_0_mint_account.as_ref().unwrap().data).unwrap();
+        common_utils::unpack_mint(&token_0_mint_account.as_ref().unwrap().data)?;
     let token_1_mint_info =
-        common_utils::unpack_mint(&token_1_mint_account.as_ref().unwrap().data).unwrap();
-    let epoch = rpc_client.get_epoch_info().unwrap().epoch;
+        common_utils::unpack_mint(&token_1_mint_account.as_ref().unwrap().data)?;
+    let epoch = rpc_client.get_epoch_info().await?.epoch;
 
     let (total_token_0_amount, total_token_1_amount) = pool_state.vault_amount_without_fee(
         token_0_vault_info.base.amount,
@@ -230,7 +230,7 @@ pub fn remove_liquidity_calculate(
     })
 }
 
-pub fn swap_calculate(
+pub async fn swap_calculate(
     rpc_client: &RpcClient,
     pool_id: Pubkey,
     user_input_token: Pubkey,
@@ -240,7 +240,7 @@ pub fn swap_calculate(
 ) -> Result<CpSwapSwapChangeResult> {
     let pool_state =
         rpc::get_anchor_account::<raydium_cp_swap::states::PoolState>(&rpc_client, &pool_id)
-            .unwrap()
+            .await?
             .unwrap();
 
     // load account
@@ -252,15 +252,14 @@ pub fn swap_calculate(
         pool_state.token_1_mint,
         user_input_token,
     ];
-    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).unwrap();
-    let epoch = rpc_client.get_epoch_info().unwrap().epoch;
-    let [amm_config_account, token_0_vault_account, token_1_vault_account, token_0_mint_account, token_1_mint_account, user_input_token_account] =
+    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).await?;
+    let epoch = rpc_client.get_epoch_info().await?.epoch;
+    let [amm_config_account, token_0_vault_account, token_1_vault_account, token_0_mint_account, token_1_mint_account, user_input_token_account]: &[_; 6] =
         array_ref![rsps, 0, 6];
     // docode account
     let amm_config_state = common_utils::deserialize_anchor_account::<
         raydium_cp_swap::states::AmmConfig,
-    >(amm_config_account.as_ref().unwrap())
-    .unwrap();
+    >(amm_config_account.as_ref().unwrap())?;
 
     let token_0_vault_info =
         common_utils::unpack_token(&token_0_vault_account.as_ref().unwrap().data).unwrap();

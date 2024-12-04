@@ -555,9 +555,9 @@ pub fn handle_program_event(log_event: &str, with_prefix: bool) -> Result<(), Cl
                 println!("unknow event: {}", log_event);
             }
         }
-        return Ok(());
+        Ok(())
     } else {
-        return Ok(());
+        Ok(())
     }
 }
 

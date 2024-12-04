@@ -5,7 +5,7 @@ use clap::Parser;
 use common::{common_types, common_utils, rpc, token};
 use raydium_amm::state::Loadable;
 use solana_client::{
-    rpc_client::RpcClient,
+    nonblocking::rpc_client::RpcClient,
     rpc_filter::{Memcmp, RpcFilterType},
 };
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Signer};
@@ -134,11 +134,11 @@ pub enum AmmCommands {
         event_data: String,
     },
 }
-pub fn process_amm_commands(
+pub async fn process_amm_commands(
     command: AmmCommands,
     config: &common_types::CommonConfig,
 ) -> Result<Option<Vec<Instruction>>> {
-    let rpc_client = RpcClient::new(config.cluster().url());
+    let rpc_client = RpcClient::new(config.cluster().url().to_string());
     let wallet_keypair = common_utils::read_keypair_file(&config.wallet())?;
     let payer_pubkey = wallet_keypair.pubkey();
 
@@ -155,7 +155,7 @@ pub fn process_amm_commands(
         } => {
             let market_keys =
                 openbook::get_keys_for_market(&rpc_client, &config.openbook_program(), &market)
-                    .unwrap();
+                    .await?;
             assert_eq!(coin_mint, *market_keys.coin_mint);
             assert_eq!(pc_mint, *market_keys.pc_mint);
             let amm_keys = amm_utils::get_amm_pda_keys(
@@ -201,7 +201,7 @@ pub fn process_amm_commands(
                 config.slippage(),
                 base_side,
             )
-            .unwrap();
+            .await?;
             let deposit_token_coin = if let Some(deposit_token_coin) = deposit_token_coin {
                 deposit_token_coin
             } else {
@@ -281,7 +281,7 @@ pub fn process_amm_commands(
                     None
                 },
             )
-            .unwrap();
+            .await?;
             let withdraw_token_lp = if let Some(withdraw_token_lp) = withdraw_token_lp {
                 withdraw_token_lp
             } else {
@@ -371,7 +371,8 @@ pub fn process_amm_commands(
                 amount_specified,
                 config.slippage(),
                 base_in,
-            )?;
+            )
+            .await?;
             let mut instructions = Vec::new();
             let user_output_token = if let Some(user_output_token) = user_output_token {
                 user_output_token
@@ -437,7 +438,7 @@ pub fn process_amm_commands(
                 )?
             };
             instructions.extend(vec![swap_instruction]);
-            return Ok(Some(instructions));
+            Ok(Some(instructions))
         }
         AmmCommands::FetchPool {
             pool_id,
@@ -448,7 +449,7 @@ pub fn process_amm_commands(
                 // fetch specified pool
                 let pool_state =
                     rpc::get_account::<raydium_amm::state::AmmInfo>(&rpc_client, &pool_id.unwrap())
-                        .unwrap()
+                        .await?
                         .unwrap();
                 println!("{:#?}", pool_state);
             } else {
@@ -481,7 +482,7 @@ pub fn process_amm_commands(
                     config.amm_program(),
                     filters,
                 )
-                .unwrap();
+                .await?;
                 for pool in pools {
                     println!("pool_id:{}", pool.0);
                     println!(
@@ -490,18 +491,18 @@ pub fn process_amm_commands(
                     );
                 }
             }
-            return Ok(None);
+            Ok(None)
         }
         AmmCommands::DecodeIx { ix_data } => {
             decode_amm_ix_event::handle_program_instruction(
                 ix_data.as_str(),
                 common_types::InstructionDecodeType::BaseHex,
             )?;
-            return Ok(None);
+            Ok(None)
         }
         AmmCommands::DecodeEvent { event_data } => {
             decode_amm_ix_event::handle_program_event(event_data.as_str(), false)?;
-            return Ok(None);
+            Ok(None)
         }
     }
 }

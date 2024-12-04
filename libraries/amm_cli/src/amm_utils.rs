@@ -7,10 +7,10 @@ use crate::{
 };
 use common::{common_utils, rpc};
 use raydium_amm::state::Loadable;
-use solana_client::rpc_client::RpcClient;
+use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 
-pub fn calculate_deposit_info(
+pub async fn calculate_deposit_info(
     rpc_client: &RpcClient,
     amm_program: Pubkey,
     pool_id: Pubkey,
@@ -20,7 +20,7 @@ pub fn calculate_deposit_info(
     base_side: u64,
 ) -> Result<AmmDepositInfoResult> {
     // load amm keys
-    let amm_keys = load_amm_keys(&rpc_client, &amm_program, &pool_id).unwrap();
+    let amm_keys = load_amm_keys(&rpc_client, &amm_program, &pool_id).await?;
     // reload accounts data to calculate amm pool vault amount
     // get multiple accounts at the same time to ensure data consistency
     let load_pubkeys = vec![
@@ -29,7 +29,7 @@ pub fn calculate_deposit_info(
         amm_keys.amm_pc_vault,
         amm_keys.amm_coin_vault,
     ];
-    let rsps = rpc::get_multiple_accounts(&rpc_client, &load_pubkeys).unwrap();
+    let rsps = rpc::get_multiple_accounts(&rpc_client, &load_pubkeys).await?;
     let accounts = array_ref![rsps, 0, 4];
     let [amm_account, amm_target_account, amm_pc_vault_account, amm_coin_vault_account] = accounts;
 
@@ -96,7 +96,7 @@ pub fn calculate_deposit_info(
     })
 }
 
-pub fn calculate_withdraw_info(
+pub async fn calculate_withdraw_info(
     rpc_client: &RpcClient,
     amm_program: Pubkey,
     pool_id: Pubkey,
@@ -104,7 +104,7 @@ pub fn calculate_withdraw_info(
     slippage_bps: Option<u64>,
 ) -> Result<AmmWithdrawInfoResult> {
     // load amm keys
-    let amm_keys = load_amm_keys(&rpc_client, &amm_program, &pool_id).unwrap();
+    let amm_keys = load_amm_keys(&rpc_client, &amm_program, &pool_id).await?;
     // reload accounts data to calculate amm pool vault amount
     // get multiple accounts at the same time to ensure data consistency
     let load_pubkeys = vec![
@@ -113,12 +113,12 @@ pub fn calculate_withdraw_info(
         amm_keys.amm_pc_vault,
         amm_keys.amm_coin_vault,
     ];
-    let rsps = rpc::get_multiple_accounts(&rpc_client, &load_pubkeys).unwrap();
-    let accounts = array_ref![rsps, 0, 4];
+    let rsps = rpc::get_multiple_accounts(&rpc_client, &load_pubkeys).await?;
+    let accounts: &[_; 4] = array_ref![rsps, 0, 4];
     let [amm_account, amm_target_account, amm_pc_vault_account, amm_coin_vault_account] = accounts;
 
     let amm_state =
-        raydium_amm::state::AmmInfo::load_from_bytes(&amm_account.as_ref().unwrap().data).unwrap();
+        raydium_amm::state::AmmInfo::load_from_bytes(&amm_account.as_ref().unwrap().data)?;
     let mut amm_state = amm_state.clone();
     let amm_target_state = raydium_amm::state::TargetOrders::load_from_bytes(
         &amm_target_account.as_ref().unwrap().data,
@@ -183,7 +183,7 @@ pub fn calculate_withdraw_info(
     })
 }
 
-pub fn calculate_swap_info(
+pub async fn calculate_swap_info(
     rpc_client: &RpcClient,
     amm_program: Pubkey,
     pool_id: Pubkey,
@@ -193,7 +193,7 @@ pub fn calculate_swap_info(
     base_in: bool,
 ) -> Result<AmmSwapInfoResult> {
     // load amm keys
-    let amm_keys = load_amm_keys(&rpc_client, &amm_program, &pool_id).unwrap();
+    let amm_keys = load_amm_keys(&rpc_client, &amm_program, &pool_id).await?;
     // reload accounts data to calculate amm pool vault amount
     // get multiple accounts at the same time to ensure data consistency
     let load_pubkeys = vec![
@@ -202,7 +202,7 @@ pub fn calculate_swap_info(
         amm_keys.amm_coin_vault,
         user_input_token,
     ];
-    let rsps = rpc::get_multiple_accounts(&rpc_client, &load_pubkeys).unwrap();
+    let rsps = rpc::get_multiple_accounts(&rpc_client, &load_pubkeys).await?;
     let accounts = array_ref![rsps, 0, 4];
     let [amm_account, amm_pc_vault_account, amm_coin_vault_account, user_input_token_account] =
         accounts;
@@ -348,12 +348,14 @@ pub fn get_amm_pda_keys(
     })
 }
 
-pub fn load_amm_keys(
+pub async fn load_amm_keys(
     client: &RpcClient,
     amm_program: &Pubkey,
     amm_pool: &Pubkey,
 ) -> Result<AmmKeys> {
-    let amm = rpc::get_account::<raydium_amm::state::AmmInfo>(client, &amm_pool)?.unwrap();
+    let amm = rpc::get_account::<raydium_amm::state::AmmInfo>(client, &amm_pool)
+        .await?
+        .unwrap();
     Ok(AmmKeys {
         amm_pool: *amm_pool,
         amm_target: amm.target_orders,

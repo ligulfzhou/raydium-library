@@ -4,7 +4,7 @@ use clap::Parser;
 use common::{common_types, common_utils, rpc, token};
 use rand::rngs::OsRng;
 use solana_client::{
-    rpc_client::RpcClient,
+    nonblocking::rpc_client::RpcClient,
     rpc_filter::{Memcmp, RpcFilterType},
 };
 use solana_sdk::{
@@ -164,12 +164,12 @@ pub enum ClmmCommands {
     },
 }
 
-pub fn process_clmm_commands(
+pub async fn process_clmm_commands(
     command: ClmmCommands,
     config: &common_types::CommonConfig,
     signing_keypairs: &mut Vec<Arc<dyn Signer>>,
 ) -> Result<Option<Vec<Instruction>>> {
-    let rpc_client = RpcClient::new(config.cluster().url());
+    let rpc_client = RpcClient::new(config.cluster().url().to_string());
     let wallet_keypair = common_utils::read_keypair_file(&config.wallet())?;
     let payer_pubkey = wallet_keypair.pubkey();
     let payer: Arc<dyn Signer> = Arc::new(wallet_keypair);
@@ -185,7 +185,7 @@ pub fn process_clmm_commands(
             price,
             open_time,
         } => {
-            let result = clmm_utils::create_pool_price(&rpc_client, mint0, mint1, price)?;
+            let result = clmm_utils::create_pool_price(&rpc_client, mint0, mint1, price).await?;
             let create_pool_instr = clmm_instructions::create_pool_instr(
                 &config,
                 amm_config,
@@ -218,7 +218,8 @@ pub fn process_clmm_commands(
                 config.slippage(),
                 false,
                 base_token0,
-            )?;
+            )
+            .await?;
             let deposit_token0 = if let Some(deposit_token0) = deposit_token0 {
                 deposit_token0
             } else {
@@ -243,8 +244,9 @@ pub fn process_clmm_commands(
                 &rpc_client,
                 &payer_pubkey,
                 &config.clmm_program(),
-            );
-            let rsps = rpc_client.get_multiple_accounts(&positions)?;
+            )
+            .await;
+            let rsps = rpc_client.get_multiple_accounts(&positions).await?;
             let mut user_positions = Vec::new();
             for rsp in rsps {
                 match rsp {
@@ -333,7 +335,8 @@ pub fn process_clmm_commands(
                 config.slippage(),
                 false,
                 base_token0,
-            )?;
+            )
+            .await?;
             let deposit_token0 = if let Some(deposit_token0) = deposit_token0 {
                 deposit_token0
             } else {
@@ -357,8 +360,9 @@ pub fn process_clmm_commands(
                 &rpc_client,
                 &payer_pubkey,
                 &config.clmm_program(),
-            );
-            let rsps = rpc_client.get_multiple_accounts(&positions)?;
+            )
+            .await;
+            let rsps = rpc_client.get_multiple_accounts(&positions).await?;
             let mut user_positions = Vec::new();
             for rsp in rsps {
                 match rsp {
@@ -437,14 +441,16 @@ pub fn process_clmm_commands(
                 config.slippage(),
                 true,
                 base_token0,
-            )?;
+            )
+            .await?;
             // load position
             let (_nft_tokens, positions) = clmm_utils::get_nft_accounts_and_positions_by_owner(
                 &rpc_client,
                 &payer_pubkey,
                 &config.clmm_program(),
-            );
-            let rsps = rpc_client.get_multiple_accounts(&positions)?;
+            )
+            .await;
+            let rsps = rpc_client.get_multiple_accounts(&positions).await?;
             let mut user_positions = Vec::new();
             for rsp in rsps {
                 match rsp {
@@ -600,7 +606,8 @@ pub fn process_clmm_commands(
                 limit_price,
                 base_in,
                 config.slippage(),
-            )?;
+            )
+            .await?;
 
             let mut instructions = Vec::new();
             let user_output_token = if let Some(user_output_token) = user_output_token {
@@ -647,7 +654,7 @@ pub fn process_clmm_commands(
                 result.is_base_input,
             )?;
             instructions.extend(swap_instr);
-            return Ok(Some(instructions));
+            Ok(Some(instructions))
         }
         ClmmCommands::FetchPool {
             pool_id,
@@ -660,7 +667,7 @@ pub fn process_clmm_commands(
                     &rpc_client,
                     &pool_id,
                 )
-                .unwrap()
+                .await?
                 .unwrap();
                 println!("{:#?}", pool_state);
             } else {
@@ -699,7 +706,7 @@ pub fn process_clmm_commands(
                     config.clmm_program(),
                     filters,
                 )
-                .unwrap();
+                .await?;
                 for pool in pools {
                     println!("pool_id:{}", pool.0);
                     println!(
@@ -721,7 +728,7 @@ pub fn process_clmm_commands(
                         &rpc_client,
                         &amm_config,
                     )
-                    .unwrap()
+                    .await?
                     .unwrap();
                 // println!("{:#?}", amm_config_state);
                 let trade_fee_rate =
@@ -749,12 +756,11 @@ pub fn process_clmm_commands(
                         raydium_amm_v3::states::AmmConfig::LEN as u64,
                     )]),
                 )
-                .unwrap();
+                .await?;
                 for amm_config in amm_configs {
                     let amm_config_state = common_utils::deserialize_anchor_account::<
                         raydium_amm_v3::states::AmmConfig,
-                    >(&amm_config.1)
-                    .unwrap();
+                    >(&amm_config.1)?;
                     // println!("{:#?}", amm_config_state);
                     let trade_fee_rate =
                         amm_config_state.trade_fee_rate as f64 / common_types::TEN_THOUSAND as f64;
@@ -777,18 +783,18 @@ pub fn process_clmm_commands(
             if !config_info.is_empty() {
                 println!("{}", config_info);
             }
-            return Ok(None);
+            Ok(None)
         }
         ClmmCommands::DecodeIx { ix_data } => {
             decode_clmm_ix_event::handle_program_instruction(
                 ix_data.as_str(),
                 common_types::InstructionDecodeType::BaseHex,
             )?;
-            return Ok(None);
+            Ok(None)
         }
         ClmmCommands::DecodeEvent { event_data } => {
             decode_clmm_ix_event::handle_program_event(event_data.as_str(), false)?;
-            return Ok(None);
+            Ok(None)
         }
     }
 }

@@ -3,7 +3,7 @@ use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_account_decoder::UiAccountEncoding;
 use solana_client::{
-    rpc_client::RpcClient,
+    nonblocking::rpc_client::RpcClient,
     rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig, RpcSendTransactionConfig},
     rpc_filter::RpcFilterType,
     rpc_request::RpcRequest,
@@ -16,34 +16,38 @@ use solana_sdk::{
 };
 use solana_transaction_status::UiTransactionEncoding;
 
-pub fn build_txn(
+pub async fn build_txn(
     client: &RpcClient,
     instructions: &[Instruction],
     fee_payer: &Pubkey,
     signing_keypairs: &dyn Signers,
 ) -> Result<Transaction> {
-    let blockhash = client.get_latest_blockhash().unwrap();
+    let blockhash = client.get_latest_blockhash().await?;
     let message = Message::new_with_blockhash(&instructions, Some(fee_payer), &blockhash);
     let mut transaction = Transaction::new_unsigned(message);
 
-    transaction
-        .try_partial_sign(signing_keypairs, blockhash)
-        .unwrap();
+    transaction.try_partial_sign(signing_keypairs, blockhash)?;
     Ok(transaction)
 }
 
-pub fn send_txn(client: &RpcClient, txn: &Transaction, skip_preflight: bool) -> Result<Signature> {
-    Ok(client.send_and_confirm_transaction_with_spinner_and_config(
-        txn,
-        CommitmentConfig::confirmed(),
-        RpcSendTransactionConfig {
-            skip_preflight,
-            ..RpcSendTransactionConfig::default()
-        },
-    )?)
+pub async fn send_txn(
+    client: &RpcClient,
+    txn: &Transaction,
+    skip_preflight: bool,
+) -> Result<Signature> {
+    Ok(client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            txn,
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight,
+                ..RpcSendTransactionConfig::default()
+            },
+        )
+        .await?)
 }
 
-pub fn simulate_transaction(
+pub async fn simulate_transaction(
     client: &RpcClient,
     transaction: &Transaction,
     sig_verify: bool,
@@ -60,25 +64,28 @@ pub fn simulate_transaction(
         serde_json::json!([serialized_encoded, {
             "sigVerify": sig_verify, "commitment": cfg.commitment, "encoding": Some(UiTransactionEncoding::Base64)
         }]),
-    )
+    ).await
 }
 
-pub fn send_without_confirm_txn(client: &RpcClient, txn: &Transaction) -> Result<Signature> {
-    Ok(client.send_transaction_with_config(
-        txn,
-        RpcSendTransactionConfig {
-            skip_preflight: true,
-            ..RpcSendTransactionConfig::default()
-        },
-    )?)
+pub async fn send_without_confirm_txn(client: &RpcClient, txn: &Transaction) -> Result<Signature> {
+    Ok(client
+        .send_transaction_with_config(
+            txn,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..RpcSendTransactionConfig::default()
+            },
+        )
+        .await?)
 }
 
-pub fn get_account<T>(client: &RpcClient, addr: &Pubkey) -> Result<Option<T>>
+pub async fn get_account<T>(client: &RpcClient, addr: &Pubkey) -> Result<Option<T>>
 where
     T: Clone,
 {
     if let Some(account) = client
-        .get_account_with_commitment(addr, CommitmentConfig::processed())?
+        .get_account_with_commitment(addr, CommitmentConfig::processed())
+        .await?
         .value
     {
         let account_data = account.data.as_slice();
@@ -89,12 +96,13 @@ where
     }
 }
 
-pub fn get_anchor_account<T: AccountDeserialize>(
+pub async fn get_anchor_account<T: AccountDeserialize>(
     client: &RpcClient,
     addr: &Pubkey,
 ) -> Result<Option<T>> {
     if let Some(account) = client
-        .get_account_with_commitment(addr, CommitmentConfig::processed())?
+        .get_account_with_commitment(addr, CommitmentConfig::processed())
+        .await?
         .value
     {
         let mut data: &[u8] = &account.data;
@@ -105,14 +113,14 @@ pub fn get_anchor_account<T: AccountDeserialize>(
     }
 }
 
-pub fn get_multiple_accounts(
+pub async fn get_multiple_accounts(
     client: &RpcClient,
     pubkeys: &[Pubkey],
 ) -> Result<Vec<Option<Account>>> {
-    Ok(client.get_multiple_accounts(pubkeys)?)
+    Ok(client.get_multiple_accounts(pubkeys).await?)
 }
 
-pub fn get_program_accounts_with_filters(
+pub async fn get_program_accounts_with_filters(
     client: &RpcClient,
     program: Pubkey,
     filters: Option<Vec<RpcFilterType>>,
@@ -129,6 +137,6 @@ pub fn get_program_accounts_with_filters(
                 with_context: Some(false),
             },
         )
-        .unwrap();
+        .await?;
     Ok(accounts)
 }

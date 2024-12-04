@@ -9,14 +9,14 @@ use anyhow::Result;
 use arrayref::array_ref;
 use common::{common_types::TokenInfo, common_utils, rpc};
 use raydium_amm_v3::libraries::{liquidity_math, tick_math};
-use solana_client::rpc_client::RpcClient;
+use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::{
     collections::VecDeque,
     ops::{DerefMut, Neg},
 };
 
-pub fn create_pool_price(
+pub async fn create_pool_price(
     rpc_client: &RpcClient,
     mint0: Pubkey,
     mint1: Pubkey,
@@ -31,7 +31,7 @@ pub fn create_pool_price(
     }
     println!("mint0:{}, mint1:{}, price:{}", mint0, mint1, price);
     let load_pubkeys = vec![mint0, mint1];
-    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).unwrap();
+    let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).await?;
     let mint0_token_program = rsps[0].as_ref().unwrap().owner;
     let mint1_token_program = rsps[1].as_ref().unwrap().owner;
     let mint0_info = common_utils::unpack_mint(&rsps[0].as_ref().unwrap().data).unwrap();
@@ -53,7 +53,7 @@ pub fn create_pool_price(
     })
 }
 
-pub fn calculate_liquidity_change(
+pub async fn calculate_liquidity_change(
     rpc_client: &RpcClient,
     pool_id: Pubkey,
     tick_lower_price: f64,
@@ -64,7 +64,7 @@ pub fn calculate_liquidity_change(
     is_base_0: bool,
 ) -> Result<ClmmLiquidityChangeResult> {
     let pool = rpc::get_anchor_account::<raydium_amm_v3::states::PoolState>(rpc_client, &pool_id)
-        .unwrap()
+        .await?
         .unwrap();
     let mut load_pubkeys = vec![pool.token_mint_0, pool.token_mint_1];
 
@@ -82,7 +82,7 @@ pub fn calculate_liquidity_change(
             }
         }
     }
-    let mut rsps = rpc_client.get_multiple_accounts(&load_pubkeys).unwrap();
+    let mut rsps = rpc_client.get_multiple_accounts(&load_pubkeys).await?;
     let mint0_token_program = rsps.remove(0).unwrap().owner;
     let mint1_token_program = rsps.remove(0).unwrap().owner;
     for (item, rsp) in reward_items.iter_mut().zip(rsps.iter()) {
@@ -149,7 +149,8 @@ pub fn calculate_liquidity_change(
         pool.token_mint_1,
         amount_0_with_slippage,
         amount_1_with_slippage,
-    );
+    )
+    .await;
     println!(
         "transfer_fee_0:{}, transfer_fee_1:{}",
         transfer_fee.0.transfer_fee, transfer_fee.1.transfer_fee
@@ -189,7 +190,7 @@ pub fn calculate_liquidity_change(
     })
 }
 
-pub fn calculate_swap_change(
+pub async fn calculate_swap_change(
     rpc_client: &RpcClient,
     raydium_v3_program: Pubkey,
     pool_id: Pubkey,
@@ -202,7 +203,7 @@ pub fn calculate_swap_change(
 ) -> Result<ClmmSwapChangeResult> {
     let pool_state =
         rpc::get_anchor_account::<raydium_amm_v3::states::PoolState>(rpc_client, &pool_id)
-            .unwrap()
+            .await?
             .unwrap();
     // load mult account
     let load_accounts = vec![
@@ -212,8 +213,8 @@ pub fn calculate_swap_change(
         pool_state.token_mint_1,
         tickarray_bitmap_extension,
     ];
-    let rsps = rpc_client.get_multiple_accounts(&load_accounts).unwrap();
-    let epoch = rpc_client.get_epoch_info().unwrap().epoch;
+    let rsps = rpc_client.get_multiple_accounts(&load_accounts).await?;
+    let epoch = rpc_client.get_epoch_info().await?.epoch;
     let [user_input_account, amm_config_account, mint0_account, mint1_account, tickarray_bitmap_extension_account] =
         array_ref![rsps, 0, 5];
     let mint0_token_program = mint0_account.as_ref().unwrap().owner;
@@ -282,7 +283,8 @@ pub fn calculate_swap_change(
         &pool_state,
         &tickarray_bitmap_extension_state,
         zero_for_one,
-    );
+    )
+    .await;
     let sqrt_price_limit_x64 = if limit_price.is_some() {
         let sqrt_price_x64 = clmm_math::price_to_sqrt_price_x64(
             limit_price.unwrap(),
@@ -359,7 +361,7 @@ pub fn calculate_swap_change(
     })
 }
 
-fn load_cur_and_next_five_tick_array(
+async fn load_cur_and_next_five_tick_array(
     rpc_client: &RpcClient,
     raydium_v3_program: Pubkey,
     pool_id: Pubkey,
@@ -408,7 +410,10 @@ fn load_cur_and_next_five_tick_array(
         );
         max_array_size -= 1;
     }
-    let tick_array_rsps = rpc_client.get_multiple_accounts(&tick_array_keys).unwrap();
+    let tick_array_rsps = rpc_client
+        .get_multiple_accounts(&tick_array_keys)
+        .await
+        .unwrap();
     let mut tick_arrays = VecDeque::new();
     for tick_array in tick_array_rsps {
         let tick_array_state = common_utils::deserialize_anchor_account::<
@@ -638,12 +643,12 @@ fn swap_compute(
     Ok((state.amount_calculated, tick_array_start_index_vec))
 }
 
-pub fn get_nft_accounts_and_positions_by_owner(
+pub async fn get_nft_accounts_and_positions_by_owner(
     client: &RpcClient,
     owner: &Pubkey,
     raydium_amm_v3_program: &Pubkey,
 ) -> (Vec<TokenInfo>, Vec<Pubkey>) {
-    let nft_accounts_info = common_utils::get_nft_accounts_by_owner(client, owner);
+    let nft_accounts_info = common_utils::get_nft_accounts_by_owner(client, owner).await;
     let user_position_account: Vec<Pubkey> = nft_accounts_info
         .iter()
         .map(|&nft| {

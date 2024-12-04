@@ -4,7 +4,7 @@ use clap::Parser;
 use common::{common_types, common_utils, rpc, token};
 use rand::rngs::OsRng;
 use solana_client::{
-    rpc_client::RpcClient,
+    nonblocking::rpc_client::RpcClient,
     rpc_filter::{Memcmp, RpcFilterType},
 };
 use solana_sdk::{
@@ -134,12 +134,12 @@ pub enum CpSwapCommands {
     },
 }
 
-pub fn process_cpswap_commands(
+pub async fn process_cpswap_commands(
     command: CpSwapCommands,
     config: &common_types::CommonConfig,
     signing_keypairs: &mut Vec<Arc<dyn Signer>>,
 ) -> Result<Option<Vec<Instruction>>> {
-    let rpc_client = RpcClient::new(config.cluster().url());
+    let rpc_client = RpcClient::new(config.cluster().url().to_string());
     let wallet_keypair = common_utils::read_keypair_file(&config.wallet())?;
     let payer_pubkey = wallet_keypair.pubkey();
     let payer: Arc<dyn Signer> = Arc::new(wallet_keypair);
@@ -158,7 +158,7 @@ pub fn process_cpswap_commands(
             random_pool,
         } => {
             let load_pubkeys = vec![user_token0, user_token1];
-            let rsps = rpc_client.get_multiple_accounts(&load_pubkeys)?;
+            let rsps = rpc_client.get_multiple_accounts(&load_pubkeys).await?;
             let token0_program = rsps[0].as_ref().unwrap().owner;
             let token1_program = rsps[1].as_ref().unwrap().owner;
             let user_token0_account =
@@ -245,7 +245,8 @@ pub fn process_cpswap_commands(
                 amount_specified,
                 config.slippage(),
                 base_token0,
-            )?;
+            )
+            .await?;
             let deposit_token0 = if let Some(deposit_token0) = deposit_token0 {
                 deposit_token0
             } else {
@@ -313,7 +314,8 @@ pub fn process_cpswap_commands(
                 pool_id,
                 input_lp_amount,
                 config.slippage(),
-            )?;
+            )
+            .await?;
             let withdraw_token_lp = if let Some(withdraw_token_lp) = withdraw_token_lp {
                 withdraw_token_lp
             } else {
@@ -394,7 +396,8 @@ pub fn process_cpswap_commands(
                 amount_specified,
                 config.slippage(),
                 base_in,
-            )?;
+            )
+            .await?;
 
             let mut instructions = Vec::new();
             let user_output_token = if let Some(user_output_token) = user_output_token {
@@ -464,7 +467,7 @@ pub fn process_cpswap_commands(
                     &rpc_client,
                     &pool_id,
                 )
-                .unwrap()
+                .await?
                 .unwrap();
                 println!("{:#?}", pool_state);
             } else {
@@ -503,7 +506,7 @@ pub fn process_cpswap_commands(
                     config.cp_program(),
                     filters,
                 )
-                .unwrap();
+                .await?;
                 for pool in pools {
                     println!("pool_id:{}", pool.0);
                     println!(
@@ -525,7 +528,7 @@ pub fn process_cpswap_commands(
                         &rpc_client,
                         &amm_config,
                     )
-                    .unwrap()
+                    .await?
                     .unwrap();
                 // println!("{:#?}", amm_config_state);
                 let trade_fee_rate =
@@ -552,12 +555,11 @@ pub fn process_cpswap_commands(
                         raydium_cp_swap::states::AmmConfig::LEN as u64,
                     )]),
                 )
-                .unwrap();
+                .await?;
                 for amm_config in amm_configs {
                     let amm_config_state = common_utils::deserialize_anchor_account::<
                         raydium_cp_swap::states::AmmConfig,
-                    >(&amm_config.1)
-                    .unwrap();
+                    >(&amm_config.1)?;
                     // println!("{:#?}", amm_config_state);
                     let trade_fee_rate =
                         amm_config_state.trade_fee_rate as f64 / common_types::TEN_THOUSAND as f64;
